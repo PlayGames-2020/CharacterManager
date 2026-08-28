@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "CharacterManager"
+dynamic = ["version"]
+author = "PlayGames-2020"
+description = """
+A Python library for creating, validating, and managing characters, 
+RPG stats, inventories, equipment, skills, and relationships.
+"""
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "PlayGames-2020", email = "playgames16.01.2020@gmail.com" },
+]
+license = { file = "LICENSE" }
+keywords = ["characters", "rpg", "game", "inventory", "relationships"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2"
+]
+
+[project.urls]
+Homepage = "https://github.com/PlayGames-2020/CharacterManager"
+Repository = "https://github.com/PlayGames-2020/CharacterManager.git"
+Documentation = "https://github.com/PlayGames-2020/CharacterManager/blob/main/README.md"
+Authors = "https://github.com/PlayGames-2020"
+
+[tool.hatch.version]
+path = "CharacterManager/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["CharacterManager"]
+exclude = [
+    "*.pyc"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
