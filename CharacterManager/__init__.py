@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import FrozenSet, Literal, Tuple, Dict
+from typing import FrozenSet, Literal, Tuple, Dict, Union, Any
 from dataclasses import dataclass
 from decimal import Decimal
 
-__version__ = "0.0.1-alpha"
+__version__ = "0.0.1-alpha1"
 __author__ = "PlayGames-2020"
 __summary__ = ""
 
@@ -150,7 +150,7 @@ DEFAULT_RACE_FOR_VALIDATION = "human"
 
 @dataclass(frozen=True)
 class RaceConstraint:
-    """Per-race physical / age envelope.
+    """Per-race physical and age envelope.
 
     All tuples are inclusive ranges. ``adult_age`` is the age at which
     the race is mature (used by :py:meth:`Character.is_adult`).
@@ -538,6 +538,46 @@ RACE_NPC = Literal[
 ]
 
 
+# ===================================================================
+# Time of day
+# ===================================================================
+
+ToD_DAWN = Literal["dawn", "early morning"]
+ToD_MORNING = Literal["morning"]
+ToD_AFTERNOON = Literal["afternoon"]
+ToD_EVENING = Literal["evening"]
+ToD_NIGHT = Literal["night"]
+ToD_MIDNIGHT = Literal["midnight"]
+
+# Runtime values are kept separate from the ``Literal`` type aliases above.
+# A ``typing.Literal`` object is useful to type checkers, but it is not the
+# string value that callers should store in ``GameDate.time_day``.
+VALID_TIMES: Tuple[str, ...] = (
+    "dawn",
+    "early morning",
+    "morning",
+    "afternoon",
+    "evening",
+    "night",
+    "midnight",
+)
+
+# ===================================================================
+# Seasons
+# ===================================================================
+
+SeasonSpring = Literal["spring"]
+SeasonSummer = Literal["summer"]
+SeasonAutumn = Literal["autumn"]
+SeasonWinter = Literal["winter"]
+
+Seasons = Union[SeasonSpring, SeasonSummer, SeasonAutumn, SeasonWinter]
+TimeDays = Union[ToD_DAWN, ToD_MORNING, ToD_AFTERNOON, ToD_EVENING, ToD_NIGHT, ToD_MIDNIGHT]
+
+DaysInMonth: Union[int, Literal[30]] = 30
+MonthsInYear: Union[int, Literal[12]] = 12
+
+
 __all__ = [
     "__version__", "VERSION_INFO", "NAME",
     "DEFAULT_SEX", "DEFAULT_SEXUALITY", "DEFAULT_RACE", 
@@ -566,5 +606,36 @@ __all__ = [
     "SexLiteral", "SexualityLiteral", "RaceLiteral", "JobRPGLiteral", 
     "JobLiteral", "SocialClassLiteral", "EquipmentSlotLiteral", 
     "ItemTypeLiteral", "ItemRarityLiteral", "RelationshipBlock", "SEX_NPC", 
-    "RACE_NPC"
+    "RACE_NPC",
+    "ToD_DAWN", "ToD_MORNING", "ToD_AFTERNOON", "ToD_EVENING", "ToD_NIGHT", "ToD_MIDNIGHT", "VALID_TIMES",
+    "SeasonSpring", "SeasonSummer", "SeasonAutumn", "SeasonWinter", "Seasons",
+    "TimeDays", "DaysInMonth", "MonthsInYear",
+]
+
+# Re-export the data model from the package root so the documented
+# ``from CharacterManager import Character`` form works as expected.
+from CharacterManager.data import (  # noqa: E402
+    BaseDictDataclass,
+    Character,
+    Combat,
+    Equipment,
+    GameDate,
+    Inventory,
+    Item,
+    Location,
+    LockLayer,
+    NPC,
+    Player,
+    RPG,
+    Skill,
+    SkillBook,
+    StatusBar,
+    StatusEffect,
+)
+from CharacterManager.relationships import is_compatible  # noqa: E402
+
+__all__ += [
+    "BaseDictDataclass", "Character", "Combat", "Equipment", "GameDate",
+    "Inventory", "Item", "Location", "LockLayer", "NPC", "Player", "RPG",
+    "Skill", "SkillBook", "StatusBar", "StatusEffect", "is_compatible",
 ]

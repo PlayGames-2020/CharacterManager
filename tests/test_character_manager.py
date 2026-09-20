@@ -1,6 +1,8 @@
+import inspect
+
 import pytest
 
-from CharacterManager import __all__
+from CharacterManager import __all__, GameDate, Location, Player
 from CharacterManager.data import (
     Character,
     Combat,
@@ -120,3 +122,49 @@ def test_combat_and_rpg_core_behaviour():
     assert rpg.take_damage(25) == 10
     assert not rpg.is_alive
     assert rpg.heal(20) == 20
+
+
+def test_public_root_exports_and_docstrings_are_usable():
+    assert Character.__doc__
+    assert Combat.__doc__
+    assert RPG.__doc__
+    assert inspect.getdoc(GameDate.advance_day)
+    assert inspect.getdoc(Location.move_to)
+    assert inspect.getdoc(StatusEffect.buff)
+    assert inspect.getdoc(Inventory.add)
+
+
+def test_calendar_uses_runtime_time_strings_and_rolls_over():
+    date = GameDate(year=1, month=12, day=30)
+
+    date.advance_day()
+    assert (date.year, date.month, date.day) == (2, 1, 1)
+    assert date.season == "winter"
+    assert date.set_time("night")
+    assert date.time_day == "night"
+    assert not date.set_time("not-a-time")
+
+
+def test_player_display_and_serialization():
+    player = Player()
+    player.combat.attack = 25
+
+    assert player.display("combat.attack") == 25
+    player.locked.lock("combat")
+    assert player.display("combat.attack") == "[Hidden]"
+    assert player.as_dict()["combat"]["attack"] == 25
+    assert player.as_class() is not player
+
+
+def test_npc_romance_requires_matching_player_and_npc_state():
+    from CharacterManager.data import NPC
+
+    player = Player()
+    player.character = Character(age=20, sex="man", sexuality="heterosexual")
+    npc = NPC()
+    npc.configure("Ada", level=1, hp=50, sex="woman", age=20)
+
+    assert npc.is_romanceable
+    assert npc.can_romance_with(player)
+    npc.friendly = False
+    assert not npc.can_romance_with(player)

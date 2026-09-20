@@ -26,7 +26,9 @@ from CharacterManager import (
     ITEM_TYPE_SLOTS, SEX_NPC, RACE_NPC,
     SexLiteral, SexualityLiteral, RaceLiteral, JobRPGLiteral, 
     JobLiteral, SocialClassLiteral, EquipmentSlotLiteral, 
-    ItemTypeLiteral, ItemRarityLiteral, RelationshipBlock
+    ItemTypeLiteral, ItemRarityLiteral, RelationshipBlock,
+    TimeDays, DaysInMonth, MonthsInYear, VALID_TIMES, 
+    SeasonSpring, SeasonSummer, SeasonAutumn, SeasonWinter
 )
 
 from CharacterManager.relationships import is_compatible
@@ -46,6 +48,7 @@ class BaseDictDataclass:
     """
 
     def as_dict(self) -> Dict[str, Any]:
+        """Return a recursively converted dictionary of dataclass fields."""
         if not is_dataclass(self):
             raise TypeError(
                 f"{self.__class__.__name__} must be decorated with @dataclass "
@@ -54,6 +57,7 @@ class BaseDictDataclass:
         return asdict(self)
 
     def as_class(self) -> "BaseDictDataclass":
+        """Return a new instance initialized from this object's fields."""
         if not is_dataclass(self):
             raise TypeError(
                 f"{self.__class__.__name__} must be decorated with @dataclass "
@@ -111,6 +115,7 @@ class StatusEffect(BaseDictDataclass):
         duration: int = DEFAULT_STATUS_DURATION,
         description: str = "",
     ) -> "StatusEffect":
+        """Create a temporary positive stat modifier."""
         return cls(
             name=name,
             duration=duration,
@@ -128,6 +133,7 @@ class StatusEffect(BaseDictDataclass):
         duration: int = DEFAULT_STATUS_DURATION,
         description: str = "",
     ) -> "StatusEffect":
+        """Create a temporary negative stat modifier."""
         return cls(
             name=name,
             duration=duration,
@@ -145,6 +151,7 @@ class StatusEffect(BaseDictDataclass):
         duration: int = DEFAULT_STATUS_DURATION,
         description: str = "",
     ) -> "StatusEffect":
+        """Create a damage-over-time effect, clamping damage at zero."""
         return cls(
             name=name,
             duration=duration,
@@ -162,6 +169,7 @@ class StatusEffect(BaseDictDataclass):
         duration: int = DEFAULT_STATUS_DURATION,
         description: str = "",
     ) -> "StatusEffect":
+        """Create a healing-over-time effect, clamping healing at zero."""
         return cls(
             name=name,
             duration=duration,
@@ -175,6 +183,7 @@ class StatusEffect(BaseDictDataclass):
     # ----------------------------------------------------------------
 
     def is_expired(self) -> bool:
+        """Return whether no turns remain."""
         return self.duration <= 0
 
     def tick(self) -> None:
@@ -182,12 +191,15 @@ class StatusEffect(BaseDictDataclass):
         self.duration = max(0, self.duration - 1)
 
     def has_tag(self, tag: str) -> bool:
+        """Return whether this effect contains ``tag``."""
         return tag in self.tags
 
     def modifier_for(self, stat: str) -> int:
+        """Return the additive modifier for ``stat`` or zero."""
         return self.stat_modifiers.get(stat, 0)
 
     def validate(self) -> list[str]:
+        """Return validation messages; an empty list means valid."""
         errors: list[str] = []
         if not isinstance(self.name, str) or not self.name.strip():
             errors.append(
@@ -253,6 +265,7 @@ class StatusBar(BaseDictDataclass):
     effects: list[StatusEffect] = field(default_factory=list)
 
     def add(self, effect: StatusEffect) -> None:
+        """Add or replace an effect using its name as the key."""
         # Same-name semantics: a new effect with the same name
         # replaces the older one (RPG idiomatic — buffs don't stack).
         for index, existing in enumerate(self.effects):
@@ -262,6 +275,7 @@ class StatusBar(BaseDictDataclass):
         self.effects.append(effect)
 
     def add_many(self, effects: Iterable[StatusEffect]) -> int:
+        """Add each effect and return the number processed."""
         added = 0
         for effect in effects:
             self.add(effect)
@@ -275,21 +289,26 @@ class StatusBar(BaseDictDataclass):
         return len(self.effects) < before
 
     def find(self, name: str) -> Union[StatusEffect, None]:
+        """Return the named effect, or ``None`` when absent."""
         for effect in self.effects:
             if effect.name == name:
                 return effect
         return None
 
     def has_tag(self, tag: str) -> bool:
+        """Return whether any active effect contains ``tag``."""
         return any(effect.has_tag(tag) for effect in self.effects)
 
     def is_stunned(self) -> bool:
+        """Return whether the entity currently cannot act."""
         return self.has_tag("stun")
 
     def is_silenced(self) -> bool:
+        """Return whether the entity currently cannot cast."""
         return self.has_tag("silence")
 
     def is_invulnerable(self) -> bool:
+        """Return whether the entity currently ignores damage."""
         return self.has_tag("invulnerable")
 
     def total_modifier(self, stat: str) -> int:
@@ -317,6 +336,7 @@ class StatusBar(BaseDictDataclass):
         return count
 
     def validate(self) -> list[str]:
+        """Return validation messages; an empty list means valid."""
         errors: list[str] = []
         if not isinstance(self.effects, list):
             return [f"effects must be a list (got {type(self.effects).__name__})."]
@@ -358,6 +378,8 @@ def _effective_race(race: str) -> str:
 
 @dataclass
 class Character(BaseDictDataclass):
+    """Identity and physical profile for a game character."""
+
     name: str = "Andrew"
     age: int = DEFAULT_AGE
     sex: str = DEFAULT_SEX
@@ -400,6 +422,7 @@ class Character(BaseDictDataclass):
 
     @property
     def is_adult(self) -> bool:
+        """Return whether the character meets its race's adult threshold."""
         constraint = RACE_CONSTRAINTS.get(
             _effective_race(self.race),
             RACE_CONSTRAINTS[DEFAULT_RACE_FOR_VALIDATION],
@@ -472,6 +495,8 @@ class Character(BaseDictDataclass):
 
 @dataclass
 class Combat(BaseDictDataclass):
+    """Combat attributes and critical-hit/accuracy helpers."""
+
     strength: int = 10             # physical strength
     attack: int = 10               # physical attack
     magic_attack: int = 10         # magic attack
@@ -512,6 +537,8 @@ class Combat(BaseDictDataclass):
 
 @dataclass
 class RPG(BaseDictDataclass):
+    """Progression, resource pools, health and gold for an entity."""
+
     level: int = MIN_LEVEL
     xp: int = XP
     xp_to_next: int = XP_TO_NEXT
@@ -530,22 +557,27 @@ class RPG(BaseDictDataclass):
 
     @property
     def is_alive(self) -> bool:
+        """Return whether the RPG entity has positive HP."""
         return self.hp > 0
 
     @property
     def hp_pct(self) -> float:
+        """Return current HP as a ratio from zero to one."""
         return (self.hp / self.max_hp) if self.max_hp > 0 else 0.0
 
     @property
     def mp_pct(self) -> float:
+        """Return current MP as a ratio from zero to one."""
         return (self.mp / self.max_mp) if self.max_mp > 0 else 0.0
 
     @property
     def stamina_pct(self) -> float:
+        """Return current stamina as a ratio from zero to one."""
         return (self.stamina / self.max_stamina) if self.max_stamina > 0 else 0.0
 
     @property
     def xp_pct(self) -> float:
+        """Return current level progress as a ratio."""
         return (self.xp / self.xp_to_next) if self.xp_to_next > 0 else 0.0
 
     @property
@@ -626,12 +658,14 @@ class RPG(BaseDictDataclass):
         return restored
 
     def spend_stamina(self, amount: int) -> bool:
+        """Spend stamina when enough is available."""
         if amount <= 0 or self.stamina < amount:
             return False
         self.stamina -= amount
         return True
 
     def restore_stamina(self, amount: int) -> int:
+        """Restore stamina without exceeding ``max_stamina``."""
         if amount <= 0:
             return 0
         room = self.max_stamina - self.stamina
@@ -644,12 +678,14 @@ class RPG(BaseDictDataclass):
     # ----------------------------------------------------------------
 
     def earn_gold(self, amount: int) -> int:
+        """Add positive gold and return the resulting balance."""
         if amount <= 0:
             return 0
         self.gold += amount
         return self.gold
 
     def spend_gold(self, amount: int) -> bool:
+        """Spend gold when enough is available."""
         if amount <= 0 or self.gold < amount:
             return False
         self.gold -= amount
@@ -723,6 +759,7 @@ class LockLayer(BaseDictDataclass):
 
     @property
     def locked_count(self) -> int:
+        """Return the number of explicitly locked field names."""
         return len(self._locked_fields)
 
     # -- Category presets -------------------------------------------
@@ -732,6 +769,7 @@ class LockLayer(BaseDictDataclass):
     # readers don't need to remember the underlying field name.
 
     def lock_many(self, *field_names: str) -> None:
+        """Lock each non-empty field name in ``field_names``."""
         for name in field_names:
             self.lock(name)
 
@@ -823,10 +861,12 @@ class Item(BaseDictDataclass):
         return ITEM_TYPE_SLOTS.get(self.type, ())
 
     def can_equip_in(self, slot: str) -> bool:
+        """Return whether this item is valid for ``slot``."""
         return slot in self.allowed_slots()
 
     @property
     def is_equippable(self) -> bool:
+        """Return whether the item can occupy at least one equipment slot."""
         return bool(self.allowed_slots())
 
 
@@ -852,30 +892,37 @@ class Inventory(BaseDictDataclass):
     # ----------------------------------------------------------------
 
     def find(self, name: str) -> Optional[tuple[Item, int]]:
+        """Return the first stack with ``name``, or ``None``."""
         for item, count in self.slots:
             if item.name == name:
                 return (item, count)
         return None
 
     def count_of(self, name: str) -> int:
+        """Return the number of items in the named stack."""
         match = self.find(name)
         return match[1] if match else 0
 
     def is_empty(self) -> bool:
+        """Return whether the inventory contains no stacks."""
         return not self.slots
 
     def is_full(self) -> bool:
+        """Return whether current weight meets or exceeds the capacity."""
         return self.total_weight() >= self.max_weight
 
     def weight_pct(self) -> float:
+        """Return carried weight divided by maximum weight."""
         if self.max_weight <= 0:
             return 0.0
         return self.total_weight() / self.max_weight
 
     def total_weight(self) -> float:
+        """Return the total weight of all item stacks."""
         return sum(item.weight * count for item, count in self.slots)
 
     def total_value(self) -> int:
+        """Return the total gold value of all item stacks."""
         return sum(item.value * count for item, count in self.slots)
 
     # ----------------------------------------------------------------
@@ -894,11 +941,15 @@ class Inventory(BaseDictDataclass):
         # Same-name merge: stack onto existing entry.
         for index, (existing, existing_count) in enumerate(self.slots):
             if existing.name == item.name:
-                free = max(
-                    0,
-                    int((self.max_weight - self.total_weight()) / item.weight),
+                free = (
+                    count
+                    if item.weight <= 0
+                    else max(
+                        0,
+                        int((self.max_weight - self.total_weight()) / item.weight),
+                    )
                 )
-                free = min(free, count) if item.weight > 0 else count
+                free = min(free, count)
                 if free <= 0:
                     return 0
                 self.slots[index] = (existing, existing_count + free)
@@ -969,15 +1020,19 @@ class Equipment(BaseDictDataclass):
     # ----------------------------------------------------------------
 
     def get(self, slot: str) -> Optional[Item]:
+        """Return the item in ``slot``, or ``None`` when empty/unknown."""
         return self.slots.get(slot)
 
     def filled_slots(self) -> list[str]:
+        """Return slot names currently containing an item."""
         return [slot for slot, item in self.slots.items() if item is not None]
 
     def empty_slots(self) -> list[str]:
+        """Return known slot names that are currently empty."""
         return [slot for slot, item in self.slots.items() if item is None]
 
     def is_equipped(self, slot: str) -> bool:
+        """Return whether ``slot`` currently contains an item."""
         return self.slots.get(slot) is not None
 
     def total_bonus(self, stat: str) -> int:
@@ -991,6 +1046,7 @@ class Equipment(BaseDictDataclass):
         return total
 
     def all_active_effects(self) -> list[StatusEffect]:
+        """Return all status effects supplied by equipped items."""
         return [
             effect
             for item in self.slots.values()
@@ -1116,9 +1172,11 @@ class Skill(BaseDictDataclass):
     effects: list[StatusEffect] = field(default_factory=list)
 
     def is_ready(self) -> bool:
+        """Return whether the skill can currently be used."""
         return self.current_cooldown <= 0
 
     def cost_feasible(self, rpg: RPG) -> bool:
+        """Return whether costs are valid and affordable by ``rpg``."""
         if self.mana_cost < 0 or self.stamina_cost < 0:
             return False
         if self.mana_cost > rpg.mp:
@@ -1156,21 +1214,27 @@ class SkillBook(BaseDictDataclass):
     skills: dict[str, Skill] = field(default_factory=dict)
 
     def __contains__(self, name: str) -> bool:
+        """Return whether a skill named ``name`` is learned."""
         return name in self.skills
 
     def __len__(self) -> int:
+        """Return the number of learned skills."""
         return len(self.skills)
 
     def names(self) -> list[str]:
+        """Return learned skill names in insertion order."""
         return list(self.skills.keys())
 
     def get(self, name: str) -> Optional[Skill]:
+        """Return a learned skill by name, or ``None``."""
         return self.skills.get(name)
 
     def ready(self) -> list[Skill]:
+        """Return all learned skills that are ready to cast."""
         return [skill for skill in self.skills.values() if skill.is_ready()]
 
     def on_cooldown(self) -> list[Skill]:
+        """Return all learned skills currently on cooldown."""
         return [skill for skill in self.skills.values() if not skill.is_ready()]
 
     # ----------------------------------------------------------------
@@ -1188,9 +1252,11 @@ class SkillBook(BaseDictDataclass):
         return not replacing
 
     def forget(self, name: str) -> Optional[Skill]:
+        """Forget and return a skill, or return ``None`` if absent."""
         return self.skills.pop(name, None)
 
     def clear(self) -> int:
+        """Forget all skills and return the number removed."""
         count = len(self.skills)
         self.skills = {}
         return count
@@ -1249,6 +1315,116 @@ class SkillBook(BaseDictDataclass):
         return just_ready
 
 
+# ----------------------------------------------------------------
+# GameDate
+# ----------------------------------------------------------------
+
+
+@dataclass
+class GameDate(BaseDictDataclass):
+    """Calendar state with a 30-day month and six daily time periods."""
+    year: int = 0
+    month: int = 0
+    day: int = 0
+    time_day: Union[str, TimeDays] = "morning"
+
+    # ----------------------------------------------------------------
+    # Mutation
+    # ----------------------------------------------------------------
+
+    def advance_day(self, days: int = 1) -> None:
+        """Advance the calendar by non-negative ``days``."""
+        if days < 0:
+            return
+        self.day += days
+        while self.day > DaysInMonth:
+            self.day -= DaysInMonth
+            self.month += 1
+            if self.month > MonthsInYear:
+                self.month = 1
+                self.year += 1
+
+    def advcance_day(self, days: int = 1) -> None:
+        """Backward-compatible alias for :meth:`advance_day`."""
+        self.advance_day(days)
+
+    def advance_time(self) -> None:
+        """Move to the next time period, wrapping after midnight."""
+        if self.time_day in VALID_TIMES: idx = VALID_TIMES.index(self.time_day)
+        else: idx = 0
+        self.time_day = VALID_TIMES[(idx + 1) % len(VALID_TIMES)]
+
+    def set_time(self, ToD: Union[str, TimeDays]) -> bool:
+        """Set the time period and return ``False`` for unknown values."""
+        if ToD not in VALID_TIMES:
+            return False
+        self.time_day = ToD
+        return True
+
+    # ----------------------------------------------------------------
+    # Computed properties / formatting
+    # ----------------------------------------------------------------
+
+    @property
+    def season(self) -> str:
+        """Return the season associated with the current month."""
+        if self.month in (12, 1, 2):
+            return "winter"
+        if self.month in (3, 4, 5):
+            return "spring"
+        if self.month in (6, 7, 8):
+            return "summer"
+        return "autumn"
+
+    @property
+    def format_day(self) -> str:
+        """Return a human-readable day, time, season and year."""
+        return "Day {}, {} — {}, year {}".format(self.day, self.time_day, self.season, self.year)
+
+    @property
+    def format_short(self) -> str:
+        """Return the date in ``DD/MM/YYYY`` format."""
+        return f"{self.day:02d}/{self.month:02d}/{self.year:04d}"
+
+
+# ----------------------------------------------------------------
+# Location
+# ----------------------------------------------------------------
+
+
+@dataclass
+class Location(BaseDictDataclass):
+    """Current location plus one previous location for simple backtracking."""
+    region: Union[None, str] = ""
+    place: Union[None, str] = ""
+    previous_region: Union[None, str] = ""
+    previous_place: Union[None, str] = ""
+
+    def move_to(self, region: str, place: str = "") -> None:
+        """Move to a new region/place while preserving the previous location."""
+        self.previous_region = self.region
+        self.previous_place = self.place
+        self.region = region
+        self.place = place
+
+    @property
+    def move_back(self) -> bool:
+        """Restore the previous location and report whether one existed."""
+        if not self.previous_region and not self.previous_place:
+            return False
+        self.region = self.previous_region
+        self.place = self.previous_place
+        self.previous_region = ""
+        self.previous_place = ""
+        return True
+
+    @property
+    def format_location(self) -> str:
+        if self.place and self.region:
+            return f"{self.place} ({self.region})"
+        return self.region or self.place or "Unknown location"
+     
+
 # ---------------------------------------------------------------------------
 # Character dataclass
 # ---------------------------------------------------------------------------
@@ -1271,12 +1447,14 @@ class Player(BaseDictDataclass):
     equipment: Equipment = field(default_factory=Equipment)
     skillbook: SkillBook = field(default_factory=SkillBook)
     status: StatusBar = field(default_factory=StatusBar)
+    location: Location = field(default_factory=Location)
 
     # ----------------------------------------------------------------
     # Convenience accessors
     # ----------------------------------------------------------------
 
     def is_alive(self) -> bool:
+        """Return whether the player's RPG HP is above zero."""
         return self.rpg.is_alive
 
     def tick_turn(self) -> Dict[str, Any]:
@@ -1354,6 +1532,7 @@ class Player(BaseDictDataclass):
         gold: int = GOLD,
         job_rpg: JobRPGLiteral = DEFAULT_JOB_RPG
     ):
+        """Configure identity, combat values and RPG resources in place."""
         self.character.name = name
         self.character.age = age
         self.character.sex = sex
@@ -1449,14 +1628,17 @@ class NPC(BaseDictDataclass):
 
     @property
     def is_alive(self) -> bool:
+        """Return whether the NPC's RPG HP is above zero."""
         return self.rpg.hp > 0
 
     @property
     def is_hostile(self) -> bool:
+        """Return whether the NPC is marked as hostile."""
         return not self.friendly
 
     @property
     def hp_pct(self) -> float:
+        """Return NPC HP as a ratio from zero to one."""
         return (self.rpg.hp / self.rpg.max_hp) if self.rpg.max_hp > 0 else 0.0
 
     @property
@@ -1665,5 +1847,6 @@ class NPC(BaseDictDataclass):
 __all__ = [
     "BaseDictDataclass", "Character", 
     "Combat", "RPG", "LockLayer", "Item", "Inventory",
-    "Skill", "SkillBook", "Player", "NPC"
+    "Skill", "SkillBook", "StatusEffect", "StatusBar", "Player", "NPC",
+    "GameDate", "Location"
 ]
