@@ -15,7 +15,7 @@ from typing import FrozenSet, Literal, Tuple, Dict, Union, Any
 from dataclasses import dataclass
 from decimal import Decimal
 
-__version__ = "0.0.1-alpha1"
+__version__ = "0.0.1"
 __author__ = "PlayGames-2020"
 __summary__ = ""
 
@@ -379,6 +379,19 @@ DEFAULT_ITEM_VALUE = 0              # gold
 
 
 # ---------------------------------------------------------------------------
+# Shop
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_SHOP_NAME = "General Store"
+DEFAULT_SHOP_SELL_FRACTION = 0.5    # sell price as a fraction of the buy price
+INFINITE_SHOP_STOCK = -1            # stock sentinel: never runs out
+
+DEFAULT_SHOP_REPUTATION = 0         # neutral prices (both ±50% at the extremes)
+SHOP_REPUTATION_PRICE_FACTOR = 200.0  # reputation / factor in [-1..1] price swing
+
+
+# ---------------------------------------------------------------------------
 # Status effects
 # ---------------------------------------------------------------------------
 
@@ -597,6 +610,8 @@ __all__ = [
     "EQUIPMENT_SLOTS", "ITEM_TYPE_SLOTS", "ITEM_TYPES", "DEFAULT_ITEM_TYPE",
     "ITEM_RARITIES", "DEFAULT_ITEM_RARITY", "ITEM_RARITY_VALUE_MULTIPLIER", 
     "DEFAULT_INVENTORY_MAX_WEIGHT", "DEFAULT_ITEM_WEIGHT", "DEFAULT_ITEM_VALUE", 
+    "DEFAULT_SHOP_NAME", "DEFAULT_SHOP_SELL_FRACTION", "INFINITE_SHOP_STOCK", 
+    "DEFAULT_SHOP_REPUTATION", "SHOP_REPUTATION_PRICE_FACTOR", 
     "STATUS_TAGS", "DEFAULT_STATUS_DURATION", 
     "DEFAULT_SKILL_MANA_COST", "DEFAULT_SKILL_STAMINA_COST", 
     "DEFAULT_SKILL_COOLDOWN", "DEFAULT_SKILL_POWER", 
@@ -627,6 +642,8 @@ from CharacterManager.data import (  # noqa: E402
     NPC,
     Player,
     RPG,
+    Shop,
+    create_starter_shop,
     Skill,
     SkillBook,
     StatusBar,
@@ -637,5 +654,5 @@ from CharacterManager.relationships import is_compatible  # noqa: E402
 __all__ += [
     "BaseDictDataclass", "Character", "Combat", "Equipment", "GameDate",
     "Inventory", "Item", "Location", "LockLayer", "NPC", "Player", "RPG",
-    "Skill", "SkillBook", "StatusBar", "StatusEffect", "is_compatible",
+    "Shop", "create_starter_shop", "Skill", "SkillBook", "StatusBar", "StatusEffect", "is_compatible",
 ]

@@ -2,7 +2,7 @@
 
 A Python library, based on `dataclasses`, for creating and managing RPG characters and systems: identity, combat, progression, inventory, equipment, skills, status effects, calendar, location and relationships.
 
-> **Status:** alpha (`0.0.1-alpha1`). The API is still subject to change.
+> **Status:** (`0.0.1`).
 
 ## Requirements
 
@@ -108,6 +108,42 @@ Effects with the same name replace the previous effect. `StatusBar.tick()` retur
 - `Item.allowed_slots()` calculates the compatible slots;
 - `Equipment.equip()` validates the slot and returns the previous occupant;
 - `Equipment.auto_equip_from()` equips the best possible set from an inventory.
+
+### Shop
+
+`Shop` is a merchant stock that trades against an `RPG` wallet.
+Prices are derived from `Item.value` and the rarity multiplier; selling
+back pays `sell_fraction` of the buy price (default `0.5`).
+
+```python
+from CharacterManager import Shop, Inventory, Item, RPG, create_starter_shop
+
+rpg = RPG(gold=100)
+inventory = Inventory(max_weight=10.0)
+shop = create_starter_shop()          # pre-populated general store
+
+bought = shop.buy("Healing potion", rpg, count=2, inventory=inventory)
+sold = shop.sell("Iron sword", inventory, rpg)
+```
+
+`Shop` stock entries are `(Item, count)` tuples; `INFINITE_SHOP_STOCK`
+(`-1`) never depletes. Shops also track a `reputation` in `[-100, 100]`:
+a fully positive reputation halves the buy price and pays +50% on
+sales, while a fully negative one surcharges buys by 50% and halves
+the sales payout.
+
+```python
+shop.reputation = 75
+print(shop.buy_price(Item(name="Iron sword", value=120)))   # discounted
+
+# Automatic daily restock: attach the shop to the calendar and every
+# `advance_day()` refill it at day-1 stock.
+date = GameDate(year=1, month=1, day=1)
+date.attach_shop(shop)
+date.advance_day()                    # shop.restock() fires implicitly
+
+shop.restock()                        # or refill manually at any point
+```
 
 ### Skills
 

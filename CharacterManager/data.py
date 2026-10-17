@@ -24,6 +24,9 @@ from CharacterManager import (
     DEFAULT_SKILL_COOLDOWN, DEFAULT_SKILL_POWER, RACE_CONSTRAINTS,
     DEFAULT_ITEM_TYPE, DEFAULT_ITEM_RARITY, DEFAULT_ITEM_WEIGHT, DEFAULT_ITEM_VALUE,
     ITEM_TYPE_SLOTS, SEX_NPC, RACE_NPC,
+    ITEM_RARITY_VALUE_MULTIPLIER,
+    DEFAULT_SHOP_NAME, DEFAULT_SHOP_SELL_FRACTION, INFINITE_SHOP_STOCK,
+    DEFAULT_SHOP_REPUTATION, SHOP_REPUTATION_PRICE_FACTOR,
     SexLiteral, SexualityLiteral, RaceLiteral, JobRPGLiteral, 
     JobLiteral, SocialClassLiteral, EquipmentSlotLiteral, 
     ItemTypeLiteral, ItemRarityLiteral, RelationshipBlock,
@@ -995,6 +998,309 @@ class Inventory(BaseDictDataclass):
 
 
 # ---------------------------------------------------------------------------
+# Shop
+# ---------------------------------------------------------------------------
+
+
+def _shop_unit_buy_price(item: Item) -> int:
+    """Return the gold price for one ``item``, including the rarity bonus."""
+    multiplier = ITEM_RARITY_VALUE_MULTIPLIER.get(item.rarity, 1.0)
+    return max(0, int(round(item.value * multiplier)))
+
+
+def _shop_reputation_factor(reputation: int) -> float:
+    """Reputation as a price factor: clamped to [-0.5, +0.5]."""
+    return max(-100, min(100, reputation)) / SHOP_REPUTATION_PRICE_FACTOR
+
+
+def _shop_buy_multiplier(reputation: int) -> float:
+    """Buy-price factor from reputation: best rep halves, worst costs +50%."""
+    return 1.0 - _shop_reputation_factor(reputation)
+
+
+def _shop_sell_multiplier(reputation: int) -> float:
+    """Sell-price factor from reputation: best rep pays +50%, worst halves."""
+    return 1.0 + _shop_reputation_factor(reputation)
+
+
+@dataclass
+class Shop(BaseDictDataclass):
+    """A merchant stock that buys from and sells to an :class:`RPG` wallet.
+
+    Stock entries are ``(Item, count)`` tuples; a count of
+    ``INFINITE_SHOP_STOCK`` (``-1``) never depletes. Prices are derived
+    from ``Item.value`` and ``ITEM_RARITY_VALUE_MULTIPLIER`` — selling to
+    the shop yields ``sell_fraction`` of the buy price (RPG convention).
+
+    Shops track a ``reputation`` value in [-100, 100]: a fully positive
+    reputation halves buy prices (and pays +50% on sales), while a fully
+    negative one surcharges buy prices by 50% (and halves sale payouts).
+    The stock a shop opens with is mirrored into ``base_stock`` so
+    :py:meth:`restock` can refill it — typically once per in-game day.
+    """
+
+    name: str = DEFAULT_SHOP_NAME
+    stock: list[tuple[Item, int]] = field(default_factory=list)
+    sell_fraction: float = DEFAULT_SHOP_SELL_FRACTION
+    reputation: int = DEFAULT_SHOP_REPUTATION
+    base_stock: list[tuple[Item, int]] = field(default_factory=list)
+
+    # ----------------------------------------------------------------
+    # Stock management
+    # ----------------------------------------------------------------
+
+    def find(self, name: str) -> Optional[tuple[Item, int]]:
+        """Return the first stock entry with ``name``, or ``None``."""
+        for item, count in self.stock:
+            if item.name == name:
+                return (item, count)
+        return None
+
+    def add_stock(self, item: Item, count: int = INFINITE_SHOP_STOCK) -> int:
+        """Add ``count`` of ``item`` to the stock, merging by name.
+
+        Infinite stacks stay infinite. Returns the resulting count for
+        that item name.
+        """
+        for index, (existing, existing_count) in enumerate(self.stock):
+            if existing.name == item.name:
+                if existing_count == INFINITE_SHOP_STOCK or count == INFINITE_SHOP_STOCK:
+                    self.stock[index] = (existing, INFINITE_SHOP_STOCK)
+                else:
+                    self.stock[index] = (existing, existing_count + count)
+                return self.find(item.name)[1]
+        self.stock.append((item, count))
+        if not any(entry.name == item.name for entry, _ in self.base_stock):
+            self.base_stock.append((item, count))
+        return count
+
+    def remove_stock(self, name: str, count: Optional[int] = None) -> int:
+        """Remove ``count`` (or all) of a stock entry by name.
+
+        Returns how many were removed; never removes an infinite stack.
+        """
+        for index, (item, current) in enumerate(self.stock):
+            if item.name != name or current == INFINITE_SHOP_STOCK:
+                continue
+            take = current if count is None else min(current, max(0, count))
+            remaining = current - take
+            if remaining <= 0:
+                del self.stock[index]
+            else:
+                self.stock[index] = (item, remaining)
+            return take
+        return 0
+
+    def has_stock(self, name: str, count: int = 1) -> bool:
+        """Return whether ``count`` of ``name`` are available right now."""
+        if count <= 0:
+            return False
+        match = self.find(name)
+        if match is None:
+            return False
+        return match[1] == INFINITE_SHOP_STOCK or match[1] >= count
+
+    def restock(self) -> int:
+        """Rebuild ``stock`` from the opening ``base_stock`` snapshot.
+
+        The shop reopens exactly as it did on day one — call this when
+        the in-game day advances (see ``GameDate.advance_day()``).
+        Returns the number of stock entries restored.
+        """
+        self.stock = list(self.base_stock)
+        return len(self.stock)
+
+    # ----------------------------------------------------------------
+    # Pricing
+    # ----------------------------------------------------------------
+
+    def buy_price(self, item: Item, count: int = 1) -> int:
+        """Gold cost for ``count`` of ``item`` (rarity- and reputation-adjusted)."""
+        if count <= 0:
+            return 0
+        unit = int(round(_shop_unit_buy_price(item) * _shop_buy_multiplier(self.reputation)))
+        return max(0, unit) * count
+
+    def sell_price(self, item: Item, count: int = 1) -> int:
+        """Gold received when selling ``count`` of ``item`` to this shop."""
+        if count <= 0:
+            return 0
+        unit = int(round(
+            _shop_unit_buy_price(item) * self.sell_fraction
+            * _shop_sell_multiplier(self.reputation)
+        ))
+        return max(0, unit) * count
+
+    # ----------------------------------------------------------------
+    # Transactions
+    # ----------------------------------------------------------------
+
+    def buy(
+        self,
+        name: str,
+        rpg: "RPG",
+        count: int = 1,
+        inventory: Optional["Inventory"] = None,
+    ) -> int:
+        """Buy ``count`` of ``name``, paying from ``rpg.gold``.
+
+        The quantity actually bought is limited by stock, wallet and —
+        when ``inventory`` is given — by its remaining weight capacity.
+        Returns the quantity bought (which may be partial or zero).
+        """
+        if count <= 0:
+            return 0
+        match = self.find(name)
+        if match is None:
+            return 0
+        item, available = match
+        if available != INFINITE_SHOP_STOCK:
+            count = min(count, available)
+        unit = max(0, int(round(
+            _shop_unit_buy_price(item) * _shop_buy_multiplier(self.reputation)
+        )))
+        if unit <= 0:
+            affordable = count
+        else:
+            affordable = min(count, rpg.gold // unit)
+        if affordable <= 0:
+            return 0
+        bought = 0
+        while bought < affordable:
+            if inventory is None:
+                bought = affordable
+                break
+            added = inventory.add(item, affordable - bought)
+            if added <= 0:
+                break
+            bought += added
+        if bought <= 0:
+            return 0
+        if not rpg.spend_gold(unit * bought):
+            return 0
+        if available != INFINITE_SHOP_STOCK:
+            self.remove_stock(name, bought)
+        return bought
+
+    def sell(
+        self,
+        name: str,
+        inventory: "Inventory",
+        rpg: "RPG",
+        count: int = 1,
+    ) -> int:
+        """Sell ``count`` of ``name`` from ``inventory`` into this shop.
+
+        Removes the items from ``inventory`` and credits ``rpg`` with
+        ``sell_price``. Returns how many were actually sold.
+        """
+        if count <= 0:
+            return 0
+        match = inventory.find(name)
+        if match is None:
+            return 0
+        item, _held = match
+        sold = inventory.remove(name, count)
+        if sold > 0:
+            rpg.earn_gold(self.sell_price(item, sold))
+        return sold
+
+    def validate(self) -> list[str]:
+        """Return validation messages; an empty list means valid."""
+        errors: list[str] = []
+        if not isinstance(self.stock, list):
+            return [f"stock must be a list (got {type(self.stock).__name__})."]
+        for index, entry in enumerate(self.stock):
+            if not isinstance(entry, (tuple, list)) or len(entry) != 2:
+                errors.append(
+                    f"stock[{index}] must be an (Item, count) pair."
+                )
+                continue
+            item, count = entry
+            if not isinstance(item, Item):
+                errors.append(
+                    f"stock[{index}] entry must be Item "
+                    f"(got {type(item).__name__})."
+                )
+            if count != INFINITE_SHOP_STOCK and (
+                not isinstance(count, int) or count < 0
+            ):
+                errors.append(
+                    f"stock[{index}] count={count!r} must be >= 0 or "
+                    f"INFINITE_SHOP_STOCK ({INFINITE_SHOP_STOCK})."
+                )
+        if isinstance(self.sell_fraction, float) and (
+            self.sell_fraction < 0.0 or self.sell_fraction > 1.0
+        ):
+            errors.append(
+                f"sell_fraction={self.sell_fraction} must be in [0.0, 1.0]."
+            )
+        if not isinstance(self.reputation, int) or not (
+            -100 <= self.reputation <= 100
+        ):
+            errors.append(
+                f"reputation={self.reputation!r} must be an int in [-100, 100]."
+            )
+        return errors
+
+
+def create_starter_shop(*, name: str = DEFAULT_SHOP_NAME) -> "Shop":
+    """Return a pre-populated general store, ready to use in a new game.
+
+    The catalogue mirrors the classic tavern stock: potions for the
+    wounded, iron for the soldiers, a trinket for the lucky, and
+    an infinite pile of torches for everyone else.
+    """
+    shop = Shop(name=name)
+    for item, count in (
+        (
+            Item(
+                name="Healing potion", type="consumable", value=25, weight=0.5,
+                description="Restores health points.",
+            ),
+            20,
+        ),
+        (
+            Item(
+                name="Mana potion", type="consumable", value=30, weight=0.5,
+                description="Restores mana points.",
+            ),
+            20,
+        ),
+        (
+            Item(
+                name="Iron sword", type="weapon", value=120, weight=2.0,
+                description="Sturdy soldier blade.", rarity="common",
+            ),
+            5,
+        ),
+        (
+            Item(
+                name="Leather armor", type="armor", value=90, weight=3.0,
+                description="Chest piece for beginners.", rarity="common",
+            ),
+            5,
+        ),
+        (
+            Item(
+                name="Copper ring", type="jewelry", value=60, weight=0.1,
+                description="A modest ring of beginnings.", rarity="uncommon",
+            ),
+            3,
+        ),
+        (
+            Item(
+                name="Torch", type="misc", value=5, weight=0.3,
+                description="Lights dark places.",
+            ),
+            INFINITE_SHOP_STOCK,
+        ),
+    ):
+        shop.add_stock(item, count)
+    return shop
+
+
+# ---------------------------------------------------------------------------
 # Equipment
 # ---------------------------------------------------------------------------
 
@@ -1327,15 +1633,32 @@ class GameDate(BaseDictDataclass):
     month: int = 0
     day: int = 0
     time_day: Union[str, TimeDays] = "morning"
+    shops: list["Shop"] = field(default_factory=list)
 
     # ----------------------------------------------------------------
     # Mutation
     # ----------------------------------------------------------------
 
+    def attach_shop(self, shop: "Shop") -> int:
+        """Register ``shop`` for a daily restock on day changes.
+
+        Idempotent by identity, not equality: attaching the same shop
+        twice is a no-op. Returns the number of shops attached.
+        """
+        if not any(existing is shop for existing in self.shops):
+            self.shops.append(shop)
+        return len(self.shops)
+
     def advance_day(self, days: int = 1) -> None:
-        """Advance the calendar by non-negative ``days``."""
+        """Advance the calendar by non-negative ``days``.
+
+        Whenever at least one day passes, every shop attached with
+        :py:meth:`attach_shop` runs :py:meth:`Shop.restock` — merchants
+        refill their shelves once per in-game day.
+        """
         if days < 0:
             return
+        day_changed = days > 0
         self.day += days
         while self.day > DaysInMonth:
             self.day -= DaysInMonth
@@ -1343,6 +1666,9 @@ class GameDate(BaseDictDataclass):
             if self.month > MonthsInYear:
                 self.month = 1
                 self.year += 1
+        if day_changed:
+            for shop in self.shops:
+                shop.restock()
 
     def advcance_day(self, days: int = 1) -> None:
         """Backward-compatible alias for :meth:`advance_day`."""
